@@ -11,7 +11,7 @@
 #   SSH must also be enabled   (used for verification step)
 
 - name: Deploy BGP watchdog to MikroTik towers
-  hosts: mikrotik
+  hosts: routers
   gather_facts: false
 
   roles:

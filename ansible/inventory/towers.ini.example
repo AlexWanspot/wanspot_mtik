@@ -1,4 +1,4 @@
-[mikrotik]
+[routers]
 tower-site-a    ansible_host=10.0.1.1
 tower-site-b    ansible_host=10.0.1.2
 tower-site-c    ansible_host=10.0.1.3
@@ -6,5 +6,5 @@ tower-site-c    ansible_host=10.0.1.3
 # Override profile name on a specific tower if it differs:
 # tower-site-d  ansible_host=10.0.1.4  bgp_pppoe_profile=print2
 
-[mikrotik:vars]
+[routers:vars]
 ansible_user=admin
