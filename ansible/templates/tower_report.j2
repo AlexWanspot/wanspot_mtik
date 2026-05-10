@@ -1,0 +1,27 @@
+
+{% set divider = '=' * 60 %}
+{% if fact_status == 'STALLED' %}
+{% set badge = '!!! STALLED !!!' %}
+{% elif fact_status == 'WARNING' %}
+{% set badge = '  ! WARNING !  ' %}
+{% else %}
+{% set badge = '    HEALTHY    ' %}
+{% endif %}
+{{ divider }}
+[ {{ badge }} ]  {{ inventory_hostname }}  ({{ ansible_host }})
+{{ divider }}
+BGP Sessions:
+{% if fact_bgp_sessions %}
+{% for s in fact_bgp_sessions %}
+  {{ s }}
+{% endfor %}
+{% else %}
+  (no sessions found)
+{% endif %}
+
+BGP Connections configured : {{ fact_bgp_connections | map(attribute='name') | list | join(', ') or 'none' }}
+PPPoE '{{ bgp_pppoe_profile }}' local-address : {{ fact_ppp_local_addr }}{% if fact_ppp_local_addr == 'NOT FOUND' %}  <-- check profile name, found: {{ fact_ppp_all_names | join(', ') }}{% endif %}
+
+Ping {{ bgp_ping_target }}            : {{ fact_ping_replies }}/3 replies  {{ '[  OK  ]' if fact_ping_replies | int > 0 else '[ FAIL ]  <-- iBGP likely stalled' }}
+Watchdog consecutive failures : {{ fact_watchdog }}{% if fact_watchdog | int >= 1 %}  <-- bounce may fire soon{% endif %}
+
