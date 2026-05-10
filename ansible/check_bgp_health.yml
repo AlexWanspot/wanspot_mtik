@@ -15,7 +15,7 @@
 #   ansible-playbook -i inventory_testing.ini check_bgp_health.yml --limit tower-site-a
 
 - name: Check BGP health on MikroTik towers
-  hosts: mikrotik
+  hosts: routers
   gather_facts: false
 
   vars:
