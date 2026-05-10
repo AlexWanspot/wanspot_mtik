@@ -1,0 +1,6 @@
+---
+bgp_watchdog_version: "1.0"
+bgp_ping_target: "10.0.0.1"
+bgp_pppoe_profile: "print"
+bgp_fail_threshold: 2          # consecutive failures before bounce (~10 min at 5m interval)
+bgp_check_interval: "00:05:00" # RouterOS time format HH:MM:SS

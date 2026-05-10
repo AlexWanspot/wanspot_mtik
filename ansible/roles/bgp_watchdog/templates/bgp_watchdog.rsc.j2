@@ -1,0 +1,72 @@
+# BGP Watchdog v{{ bgp_watchdog_version }}
+# Managed by Ansible - do not edit manually
+#
+# Detects stalled iBGP sessions by pinging {{ bgp_ping_target }} from the
+# PPPoE local-address. Returns traffic must route via iBGP, so a stalled
+# session causes the ping to fail even though the session shows established.
+# After {{ bgp_fail_threshold }} consecutive failures, bounces matching BGP connections.
+
+:local pingTarget "{{ bgp_ping_target }}"
+:local pppProfile "{{ bgp_pppoe_profile }}"
+:local failThreshold {{ bgp_fail_threshold }}
+
+:global bgpWatchdogFailCount
+
+:if ([:typeof $bgpWatchdogFailCount] = "nothing") do={
+    :set bgpWatchdogFailCount 0
+}
+
+# Resolve PPPoE source address from profile
+:local srcAddr
+:do {
+    :set srcAddr [/ppp profile get [find name=$pppProfile] local-address]
+} on-error={
+    :log error ("bgp-watchdog: ppp profile not found: " . $pppProfile)
+    :error "abort"
+}
+
+:if ([:typeof $srcAddr] = "nothing" || $srcAddr = "") do={
+    :log error ("bgp-watchdog: no local-address on ppp profile: " . $pppProfile)
+    :error "abort"
+}
+
+# Ping test — return path requires iBGP to be advertising our prefix
+:local pings [/ping address=$pingTarget src-address=$srcAddr count=3]
+
+:if ($pings > 0) do={
+    :if ($bgpWatchdogFailCount > 0) do={
+        :log info ("bgp-watchdog: recovered after " . $bgpWatchdogFailCount . " failure(s), src=" . $srcAddr)
+    }
+    :set bgpWatchdogFailCount 0
+} else={
+    :set bgpWatchdogFailCount ($bgpWatchdogFailCount + 1)
+    :log warning ("bgp-watchdog: ping " . $pingTarget . " from " . $srcAddr . \
+        " failed [" . $bgpWatchdogFailCount . "/" . $failThreshold . "]")
+
+    :if ($bgpWatchdogFailCount >= $failThreshold) do={
+        :log error "bgp-watchdog: threshold reached, bouncing BGP sessions"
+
+        # Disable all matching connections first
+        :foreach conn in=[/routing bgp connection find] do={
+            :local n [/routing bgp connection get $conn name]
+            :if ($n = "IPV4-to-FRR" || $n = "IPV6-to-FRR" || $n ~ "^RR-10\\.") do={
+                /routing bgp connection disable $conn
+                :log warning ("bgp-watchdog: disabled " . $n)
+            }
+        }
+
+        :delay 3s
+
+        # Re-enable
+        :foreach conn in=[/routing bgp connection find] do={
+            :local n [/routing bgp connection get $conn name]
+            :if ($n = "IPV4-to-FRR" || $n = "IPV6-to-FRR" || $n ~ "^RR-10\\.") do={
+                /routing bgp connection enable $conn
+                :log warning ("bgp-watchdog: enabled " . $n)
+            }
+        }
+
+        :set bgpWatchdogFailCount 0
+        :log warning "bgp-watchdog: bounce complete, counter reset"
+    }
+}

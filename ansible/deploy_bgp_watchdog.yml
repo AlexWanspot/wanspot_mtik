@@ -1,0 +1,18 @@
+---
+# Deploy or update the BGP watchdog script and scheduler on all towers.
+# Re-run this whenever the script logic changes — Ansible will update in place.
+#
+# Usage:
+#   ansible-playbook -i inventory/towers.ini deploy_bgp_watchdog.yml --ask-pass
+#   ansible-playbook -i inventory/towers.ini deploy_bgp_watchdog.yml --limit tower-site-a
+#
+# Prerequisites on each MikroTik:
+#   /ip service enable api     (port 8728, used for script deployment)
+#   SSH must also be enabled   (used for verification step)
+
+- name: Deploy BGP watchdog to MikroTik towers
+  hosts: mikrotik
+  gather_facts: false
+
+  roles:
+    - bgp_watchdog

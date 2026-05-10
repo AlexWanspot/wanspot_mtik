@@ -1,0 +1,95 @@
+---
+# Read-only health check across all towers.
+#
+# RouterOS v7 api_info does NOT support 'routing bgp session' (dynamic table)
+# or 'system script environment' (global vars). Those are queried via SSH
+# using :put/:foreach which output and return immediately (no pager hang).
+# Static config paths (routing bgp connection, ppp profile) use api_info.
+#
+# RouterOS SSH echoes commands back — use regex_findall on stdout[0] to
+# extract data lines rather than filtering stdout_lines (avoids set_fact
+# type coercion issues with >- YAML scalar).
+#
+# Usage:
+#   ansible-playbook -i inventory_testing.ini check_bgp_health.yml --ask-pass
+#   ansible-playbook -i inventory_testing.ini check_bgp_health.yml --limit tower-site-a
+
+- name: Check BGP health on MikroTik towers
+  hosts: mikrotik
+  gather_facts: false
+
+  vars:
+    bgp_ping_target: "10.0.0.1"
+    bgp_pppoe_profile: "print"
+
+  tasks:
+    # Dynamic session table — not in api_info, use :put to avoid pager
+    - name: Get BGP session state
+      community.routeros.command:
+        commands:
+          - ":foreach s in=[/routing bgp session find] do={ :put ([/routing bgp session get $s name] . \" | established=\" . [/routing bgp session get $s established] . \" | uptime=\" . [/routing bgp session get $s uptime]) }"
+      register: bgp_sessions
+      ignore_errors: true
+
+    # Static connection config — valid api_info path
+    - name: Get BGP connection config via API
+      community.routeros.api_info:
+        hostname: "{{ ansible_host }}"
+        username: "{{ ansible_user }}"
+        password: "{{ ansible_ssh_pass }}"
+        path: routing bgp connection
+      register: bgp_connections
+
+    # hide_defaults: false ensures custom profiles are never hidden
+    - name: Get PPP profiles via API
+      community.routeros.api_info:
+        hostname: "{{ ansible_host }}"
+        username: "{{ ansible_user }}"
+        password: "{{ ansible_ssh_pass }}"
+        path: ppp profile
+        hide_defaults: false
+      register: ppp_profiles
+
+    # Global variable — not in api_info, use :global + :put
+    - name: Get watchdog failure counter
+      community.routeros.command:
+        commands:
+          - ":global bgpWatchdogFailCount; :put $bgpWatchdogFailCount"
+      register: watchdog_counter
+      ignore_errors: true
+
+    # Ping test using inline :put — returns immediately, no pager
+    - name: Run ping test from PPPoE address
+      community.routeros.command:
+        commands:
+          - ":put [/ping address={{ bgp_ping_target }} src-address=[/ppp profile get [find name={{ bgp_pppoe_profile }}] local-address] count=3]"
+      register: ping_result
+      ignore_errors: true
+
+    - name: Extract facts for report
+      vars:
+        # regex_findall on the full stdout string — avoids set_fact list coercion issues
+        _sessions_raw: "{{ bgp_sessions.stdout[0] | default('') }}"
+        _ping_raw:     "{{ ping_result.stdout[0] | default('') }}"
+        _counter_raw:  "{{ watchdog_counter.stdout[0] | default('') }}"
+        # BGP connections: strip ! (null/disabled) and .id fields, keep real config
+        _clean_conns:  "{{ bgp_connections.result | default([]) | map('dict2items') | map('selectattr', 'key', 'match', '^[^!.]') | map('list') | map('items2dict') | list }}"
+      set_fact:
+        fact_bgp_sessions:    "{{ _sessions_raw | regex_findall('(?m)^[A-Za-z0-9][^\n]*established=[^\n]*') }}"
+        fact_bgp_connections: "{{ _clean_conns }}"
+        fact_ppp_all_names:   "{{ ppp_profiles.result | default([]) | map(attribute='name') | list }}"
+        fact_ppp_local_addr:  "{{ (ppp_profiles.result | default([]) | selectattr('name', 'equalto', bgp_pppoe_profile) | list | first | default({})).get('local-address', 'NOT FOUND') }}"
+        fact_ping_replies:    "{{ _ping_raw | regex_findall('(?m)^[0-9]+$') | first | default('ERR') }}"
+        fact_watchdog:        "{{ _counter_raw | trim or '0 (not yet set)' }}"
+
+    - name: Report tower health
+      debug:
+        msg:
+          - "=== {{ inventory_hostname }} ({{ ansible_host }}) ==="
+          - "BGP sessions:       {{ fact_bgp_sessions | join(' / ') or 'NONE' }}"
+          - "PPP profiles found: {{ fact_ppp_all_names | join(', ') }}"
+          - "PPPoE '{{ bgp_pppoe_profile }}' local-address: {{ fact_ppp_local_addr }}"
+          - "Ping {{ bgp_ping_target }}:  {{ fact_ping_replies }}/3 replies"
+          - "Watchdog failures:  {{ fact_watchdog }}"
+          - "BGP connection config:"
+          - "{{ fact_bgp_connections | to_nice_yaml }}"

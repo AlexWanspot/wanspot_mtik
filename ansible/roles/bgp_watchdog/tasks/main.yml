@@ -1,0 +1,55 @@
+---
+# Requires RouterOS API enabled on each tower: /ip service enable api
+# API is used because it handles multi-line script source without CLI escaping issues.
+# SSH (community.routeros.command) is used for read-only checks.
+
+- name: Render watchdog script locally
+  set_fact:
+    bgp_watchdog_script: "{{ lookup('template', 'bgp_watchdog.rsc.j2') }}"
+
+- name: Deploy BGP watchdog script
+  community.routeros.api_modify:
+    hostname: "{{ ansible_host }}"
+    username: "{{ ansible_user }}"
+    password: "{{ ansible_ssh_pass }}"
+    path: system script
+    handle_absent_entries: ignore
+    handle_entries_content: remove_as_much_as_possible
+    data:
+      - name: bgp-watchdog
+        source: "{{ bgp_watchdog_script }}"
+        policy: read,write,policy,test
+
+- name: Deploy BGP watchdog scheduler
+  community.routeros.api_modify:
+    hostname: "{{ ansible_host }}"
+    username: "{{ ansible_user }}"
+    password: "{{ ansible_ssh_pass }}"
+    path: system scheduler
+    handle_absent_entries: ignore
+    handle_entries_content: remove_as_much_as_possible
+    data:
+      - name: bgp-watchdog
+        interval: "{{ bgp_check_interval }}"
+        on-event: /system script run bgp-watchdog
+        start-time: startup
+        policy: read,write,policy,test
+
+- name: Verify script deployed via API
+  # Avoids SSH 'print' pager hang — api_info returns immediately
+  community.routeros.api_info:
+    hostname: "{{ ansible_host }}"
+    username: "{{ ansible_user }}"
+    password: "{{ ansible_ssh_pass }}"
+    path: system script
+  register: verify_result
+
+- name: Show deployment result
+  debug:
+    msg: "{{ inventory_hostname }}: script deployed, scheduler set to {{ bgp_check_interval }}"
+  when: verify_result.result | selectattr('name', 'equalto', 'bgp-watchdog') | list | length > 0
+
+- name: Warn if script not found
+  debug:
+    msg: "WARNING: {{ inventory_hostname }}: could not verify script deployment"
+  when: verify_result.result | selectattr('name', 'equalto', 'bgp-watchdog') | list | length == 0
