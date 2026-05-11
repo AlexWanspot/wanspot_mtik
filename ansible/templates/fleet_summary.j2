@@ -1,36 +1,37 @@
 
 {% set divider = '=' * 60 %}
-{% set stalled    = ansible_play_hosts | map('extract', hostvars) | selectattr('fact_status', 'equalto', 'STALLED')     | list %}
-{% set warnings   = ansible_play_hosts | map('extract', hostvars) | selectattr('fact_status', 'equalto', 'WARNING')     | list %}
-{% set noprofile  = ansible_play_hosts | map('extract', hostvars) | selectattr('fact_status', 'equalto', 'NO_PROFILE')  | list %}
-{% set healthy    = ansible_play_hosts | map('extract', hostvars) | selectattr('fact_status', 'equalto', 'HEALTHY')     | list %}
+{% set stalled  = ansible_play_hosts | map('extract', hostvars) | selectattr('fact_status', 'equalto', 'STALLED')  | list %}
+{% set warnings = ansible_play_hosts | map('extract', hostvars) | selectattr('fact_status', 'equalto', 'WARNING')  | list %}
+{% set nosrc    = ansible_play_hosts | map('extract', hostvars) | selectattr('fact_status', 'equalto', 'NO_SRC')   | list %}
+{% set healthy  = ansible_play_hosts | map('extract', hostvars) | selectattr('fact_status', 'equalto', 'HEALTHY')  | list %}
 {{ divider }}
   FLEET SUMMARY  —  {{ ansible_play_hosts | length }} tower(s) checked
-  HEALTHY: {{ healthy | length }}   WARNING: {{ warnings | length }}   STALLED: {{ stalled | length }}   NO_PROFILE: {{ noprofile | length }}
+  HEALTHY: {{ healthy | length }}   WARNING: {{ warnings | length }}   STALLED: {{ stalled | length }}   NO_SRC: {{ nosrc | length }}
 {{ divider }}
 {% for host in ansible_play_hosts %}
 {% set h = hostvars[host] %}
-{% set status = h.get('fact_status', 'UNKNOWN') %}
+{% set status   = h.get('fact_status', 'UNKNOWN') %}
+{% set src_type = h.get('fact_ping_src_type', '') %}
 {% if status == 'STALLED' %}
-!!!  {{ host }}  STALLED     ping={{ h.get('fact_ping_replies','?') }}/3  watchdog={{ h.get('fact_watchdog','?') }}
+!!!  {{ host }}  STALLED   ping={{ h.get('fact_ping_replies','?') }}/3  watchdog={{ h.get('fact_watchdog','?') }}  src={{ src_type }}
 {% elif status == 'WARNING' %}
- !   {{ host }}  WARNING     ping={{ h.get('fact_ping_replies','?') }}/3  watchdog={{ h.get('fact_watchdog','?') }}
-{% elif status == 'NO_PROFILE' %}
- ?   {{ host }}  NO_PROFILE  pppoe profile '{{ bgp_pppoe_profile }}' not found — set bgp_pppoe_profile in inventory
+ !   {{ host }}  WARNING   ping={{ h.get('fact_ping_replies','?') }}/3  watchdog={{ h.get('fact_watchdog','?') }}  src={{ src_type }}
+{% elif status == 'NO_SRC' %}
+ ?   {{ host }}  NO_SRC    ping=skipped  (no PPPoE addr or MGT_Bridge found)
 {% else %}
-     {{ host }}  ok          ping={{ h.get('fact_ping_replies','?') }}/3  watchdog={{ h.get('fact_watchdog','?') }}
+     {{ host }}  ok        ping={{ h.get('fact_ping_replies','?') }}/3  watchdog={{ h.get('fact_watchdog','?') }}  src={{ src_type }}
 {% endif %}
 {% endfor %}
 {{ divider }}
 {% if stalled | length > 0 %}
 ACTION REQUIRED: {{ stalled | map(attribute='inventory_hostname') | list | join(', ') }} — iBGP stalled, bounce BGP sessions
 {% endif %}
-{% if noprofile | length > 0 %}
-CONFIG NEEDED:   {{ noprofile | map(attribute='inventory_hostname') | list | join(', ') }} — set correct bgp_pppoe_profile in inventory
+{% if nosrc | length > 0 %}
+CONFIG NEEDED:   {{ nosrc | map(attribute='inventory_hostname') | list | join(', ') }} — no PPPoE addr or MGT_Bridge found
 {% endif %}
 {% if warnings | length > 0 %}
 CHECK:           {{ warnings | map(attribute='inventory_hostname') | list | join(', ') }} — session(s) not fully established
 {% endif %}
-{% if stalled | length == 0 and warnings | length == 0 and noprofile | length == 0 %}
+{% if stalled | length == 0 and warnings | length == 0 and nosrc | length == 0 %}
 All towers healthy.
 {% endif %}

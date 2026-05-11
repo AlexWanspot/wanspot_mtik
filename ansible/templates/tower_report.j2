@@ -4,8 +4,8 @@
 {% set badge = '!!! STALLED !!!' %}
 {% elif fact_status == 'WARNING' %}
 {% set badge = '  ! WARNING !  ' %}
-{% elif fact_status == 'NO_PROFILE' %}
-{% set badge = ' ? NO PROFILE ?' %}
+{% elif fact_status == 'NO_SRC' %}
+{% set badge = '  ? NO SOURCE ?' %}
 {% else %}
 {% set badge = '    HEALTHY    ' %}
 {% endif %}
@@ -22,11 +22,12 @@ BGP Sessions:
 {% endif %}
 
 BGP Connections configured : {{ fact_bgp_connections | map(attribute='name') | list | join(', ') or 'none' }}
-PPPoE '{{ bgp_pppoe_profile }}' local-address : {{ fact_ppp_local_addr }}{% if fact_ppp_local_addr == 'NOT FOUND' %}
-  --> Profile not found. Profiles on this device: {{ fact_ppp_all_names | join(', ') }}
-  --> Set correct name with:  bgp_pppoe_profile=<name>  in inventory{% endif %}
+PPPoE '{{ bgp_pppoe_profile }}' local-address : {{ fact_ppp_local_addr }}{% if fact_ppp_local_addr == 'NOT FOUND' %}  (profiles available: {{ fact_ppp_all_names | join(', ') }}){% endif %}
 
-Ping {{ bgp_ping_target }}            : {% if fact_ppp_local_addr == 'NOT FOUND' %}SKIPPED (no src-address){% else %}{{ fact_ping_replies }}/3 replies  {{ '[  OK  ]' if fact_ping_replies | int > 0 else '[ FAIL ]  <-- iBGP likely stalled' }}{% endif %}
+MGT_Bridge address         : {{ fact_mgt_addr }}
+Ping src-address used      : {{ fact_ping_src if fact_ping_src != '' else 'none — ping skipped' }}  [{{ fact_ping_src_type }}]
+Ping {{ bgp_ping_target }}            : {% if fact_ping_src == '' %}SKIPPED{% else %}{{ fact_ping_replies }}/3 replies  {{ '[  OK  ]' if fact_ping_replies | int > 0 else '[ FAIL ]  <-- iBGP likely stalled' }}{% endif %}{% if fact_ping_src_type == 'MGT_Bridge (fallback)' %}
+  --> Using MGT_Bridge as src — PPPoE profile '{{ bgp_pppoe_profile }}' not found{% endif %}
 
 Watchdog consecutive failures : {{ fact_watchdog }}{% if fact_watchdog | int >= 1 %}  <-- bounce may fire soon{% endif %}
 

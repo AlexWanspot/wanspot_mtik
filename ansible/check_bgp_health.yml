@@ -2,6 +2,11 @@
 # Read-only health check across all towers.
 # Outputs a clean per-tower report and a fleet summary table at the end.
 #
+# Ping src-address resolution order:
+#   1. PPPoE profile local-address (tests iBGP return path)
+#   2. MGT_Bridge ip address       (fallback — tests basic reachability)
+#   3. Skip ping entirely          (neither found)
+#
 # Usage:
 #   ansible-playbook -i inventory_testing.ini check_bgp_health.yml --ask-pass
 #   ansible-playbook -i inventory_testing.ini check_bgp_health.yml --limit tower-site-a
@@ -15,6 +20,8 @@
     bgp_pppoe_profile: "print"
 
   tasks:
+    # --- Data collection ---
+
     - name: Get BGP session state
       community.routeros.command:
         commands:
@@ -39,6 +46,14 @@
         hide_defaults: false
       register: ppp_profiles
 
+    - name: Get IP addresses via API
+      community.routeros.api_info:
+        hostname: "{{ ansible_host }}"
+        username: "{{ ansible_user }}"
+        password: "{{ ansible_ssh_pass }}"
+        path: ip address
+      register: ip_addresses
+
     - name: Get watchdog failure counter
       community.routeros.command:
         commands:
@@ -46,12 +61,36 @@
       register: watchdog_counter
       ignore_errors: true
 
-    - name: Run ping test from PPPoE address
+    # --- Resolve ping source address ---
+
+    - name: Resolve ping source address
+      vars:
+        _ppp_addr: >-
+          {{ (ppp_profiles.result | default([])
+              | selectattr('name', 'equalto', bgp_pppoe_profile)
+              | list | first | default({})).get('local-address', '') }}
+        _mgt_addr_cidr: >-
+          {{ (ip_addresses.result | default([])
+              | selectattr('interface', 'equalto', 'MGT_Bridge')
+              | list | first | default({})).get('address', '') }}
+      set_fact:
+        fact_ppp_local_addr:  "{{ _ppp_addr or 'NOT FOUND' }}"
+        fact_ppp_all_names:   "{{ ppp_profiles.result | default([]) | map(attribute='name') | list }}"
+        fact_mgt_addr:        "{{ _mgt_addr_cidr | regex_replace('/\\d+$', '') or 'NOT FOUND' }}"
+        fact_ping_src:        "{{ _ppp_addr if _ppp_addr else (_mgt_addr_cidr | regex_replace('/\\d+$', '')) }}"
+        fact_ping_src_type:   "{{ 'PPPoE profile' if _ppp_addr else ('MGT_Bridge (fallback)' if _mgt_addr_cidr else 'none') }}"
+
+    # --- Ping test with resolved src-address ---
+
+    - name: Run ping test
       community.routeros.command:
         commands:
-          - ":put [/ping address={{ bgp_ping_target }} src-address=[/ppp profile get [find name={{ bgp_pppoe_profile }}] local-address] count=3]"
+          - ":put [/ping address={{ bgp_ping_target }} src-address={{ fact_ping_src }} count=3]"
       register: ping_result
+      when: fact_ping_src != ''
       ignore_errors: true
+
+    # --- Extract remaining facts ---
 
     - name: Extract and evaluate facts
       vars:
@@ -62,16 +101,14 @@
       set_fact:
         fact_bgp_sessions:    "{{ _sessions_raw | regex_findall('(?m)^[A-Za-z0-9][^\n]*established=[^\n]*') }}"
         fact_bgp_connections: "{{ _clean_conns }}"
-        fact_ppp_all_names:   "{{ ppp_profiles.result | default([]) | map(attribute='name') | list }}"
-        fact_ppp_local_addr:  "{{ (ppp_profiles.result | default([]) | selectattr('name', 'equalto', bgp_pppoe_profile) | list | first | default({})).get('local-address', 'NOT FOUND') }}"
         fact_ping_replies:    "{{ _ping_raw | regex_findall('(?m)^[0-9]+$') | first | default('0') }}"
         fact_watchdog:        "{{ _counter_raw | trim or '0' }}"
 
     - name: Set health status
       set_fact:
         fact_status: >-
-          {{ 'NO_PROFILE'
-             if (fact_ppp_local_addr == 'NOT FOUND')
+          {{ 'NO_SRC'
+             if (fact_ping_src == '')
              else ('STALLED'
                    if (fact_ping_replies | int == 0)
                    else ('WARNING'
