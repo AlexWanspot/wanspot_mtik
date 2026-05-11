@@ -70,12 +70,14 @@
     - name: Set health status
       set_fact:
         fact_status: >-
-          {{ 'STALLED'
-             if (fact_ping_replies | int == 0)
-             else ('WARNING'
-                   if (fact_bgp_sessions | select('search', 'established=false') | list | length > 0
-                       or fact_bgp_sessions | length == 0)
-                   else 'HEALTHY') }}
+          {{ 'NO_PROFILE'
+             if (fact_ppp_local_addr == 'NOT FOUND')
+             else ('STALLED'
+                   if (fact_ping_replies | int == 0)
+                   else ('WARNING'
+                         if (fact_bgp_sessions | select('search', 'established=false') | list | length > 0
+                             or fact_bgp_sessions | length == 0)
+                         else 'HEALTHY')) }}
 
     - name: Tower report
       debug:

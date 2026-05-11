@@ -4,6 +4,8 @@
 {% set badge = '!!! STALLED !!!' %}
 {% elif fact_status == 'WARNING' %}
 {% set badge = '  ! WARNING !  ' %}
+{% elif fact_status == 'NO_PROFILE' %}
+{% set badge = ' ? NO PROFILE ?' %}
 {% else %}
 {% set badge = '    HEALTHY    ' %}
 {% endif %}
@@ -20,8 +22,11 @@ BGP Sessions:
 {% endif %}
 
 BGP Connections configured : {{ fact_bgp_connections | map(attribute='name') | list | join(', ') or 'none' }}
-PPPoE '{{ bgp_pppoe_profile }}' local-address : {{ fact_ppp_local_addr }}{% if fact_ppp_local_addr == 'NOT FOUND' %}  <-- check profile name, found: {{ fact_ppp_all_names | join(', ') }}{% endif %}
+PPPoE '{{ bgp_pppoe_profile }}' local-address : {{ fact_ppp_local_addr }}{% if fact_ppp_local_addr == 'NOT FOUND' %}
+  --> Profile not found. Profiles on this device: {{ fact_ppp_all_names | join(', ') }}
+  --> Set correct name with:  bgp_pppoe_profile=<name>  in inventory{% endif %}
 
-Ping {{ bgp_ping_target }}            : {{ fact_ping_replies }}/3 replies  {{ '[  OK  ]' if fact_ping_replies | int > 0 else '[ FAIL ]  <-- iBGP likely stalled' }}
+Ping {{ bgp_ping_target }}            : {% if fact_ppp_local_addr == 'NOT FOUND' %}SKIPPED (no src-address){% else %}{{ fact_ping_replies }}/3 replies  {{ '[  OK  ]' if fact_ping_replies | int > 0 else '[ FAIL ]  <-- iBGP likely stalled' }}{% endif %}
+
 Watchdog consecutive failures : {{ fact_watchdog }}{% if fact_watchdog | int >= 1 %}  <-- bounce may fire soon{% endif %}
 
